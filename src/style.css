@@ -79,6 +79,16 @@ input {
   font-weight: 800;
 }
 
+.file-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.file-button.secondary {
+  background: #a78bfa;
+}
+
 .file-button input {
   display: none;
 }

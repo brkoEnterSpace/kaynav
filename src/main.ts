@@ -2,6 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { readGeoTiffAsImageOverlay } from './geotiffOverlay';
+import { type DepthRaster, readDepthRaster, sampleDepthMeters } from './depthRaster';
 
 type LastGpsPoint = {
   lat: number;
@@ -16,13 +17,20 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <section class="top-panel">
       <div>
         <div class="app-title">KayNav</div>
-        <div id="statusText" class="status-text">Import your map overlay to begin.</div>
+        <div id="statusText" class="status-text">Import map and depth files.</div>
       </div>
 
-      <label class="file-button">
-        Import map
-        <input id="overlayInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
-      </label>
+      <div class="file-actions">
+        <label class="file-button">
+          Map
+          <input id="overlayInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
+        </label>
+
+        <label class="file-button secondary">
+          Depth
+          <input id="depthInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
+        </label>
+      </div>
     </section>
 
     <section class="bottom-panel">
@@ -48,8 +56,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const statusText = document.querySelector<HTMLElement>('#statusText')!;
 const overlayInput = document.querySelector<HTMLInputElement>('#overlayInput')!;
+const depthInput = document.querySelector<HTMLInputElement>('#depthInput')!;
 const startGpsButton = document.querySelector<HTMLButtonElement>('#startGpsButton')!;
 const speedValue = document.querySelector<HTMLElement>('#speedValue')!;
+const depthValue = document.querySelector<HTMLElement>('#depthValue')!;
 const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
 
 const map = L.map('map', {
@@ -68,7 +78,9 @@ let overlayLayer: L.ImageOverlay | null = null;
 let gpsMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
 let lastGpsPoint: LastGpsPoint | null = null;
+let latestGpsPoint: LastGpsPoint | null = null;
 let watchId: number | null = null;
+let depthRaster: DepthRaster | null = null;
 
 overlayInput.addEventListener('change', async () => {
   const file = overlayInput.files?.[0];
@@ -76,7 +88,7 @@ overlayInput.addEventListener('change', async () => {
   if (!file) return;
 
   try {
-    statusText.textContent = 'Reading GeoTIFF overlay...';
+    statusText.textContent = 'Reading map overlay...';
 
     const overlay = await readGeoTiffAsImageOverlay(file);
 
@@ -94,11 +106,32 @@ overlayInput.addEventListener('change', async () => {
       padding: [20, 20]
     });
 
-    statusText.textContent = `Loaded ${file.name} (${overlay.width} × ${overlay.height})`;
+    statusText.textContent = `Loaded map: ${file.name}`;
   } catch (error) {
     console.error(error);
     statusText.textContent =
-      error instanceof Error ? error.message : 'Could not load GeoTIFF overlay.';
+      error instanceof Error ? error.message : 'Could not load map overlay.';
+  }
+});
+
+depthInput.addEventListener('change', async () => {
+  const file = depthInput.files?.[0];
+
+  if (!file) return;
+
+  try {
+    statusText.textContent = 'Reading depth raster...';
+
+    depthRaster = await readDepthRaster(file);
+
+    statusText.textContent = `Loaded depth: ${file.name}`;
+    updateDepthDisplay();
+  } catch (error) {
+    console.error(error);
+    depthRaster = null;
+    depthValue.textContent = '-- m';
+    statusText.textContent =
+      error instanceof Error ? error.message : 'Could not load depth raster.';
   }
 });
 
@@ -143,17 +176,22 @@ function handleGpsPosition(position: GeolocationPosition): void {
   const accuracyM = position.coords.accuracy;
   const timeMs = position.timestamp;
 
-  const speedMps = getSpeedMetersPerSecond(position, {
+  const currentGpsPoint: LastGpsPoint = {
     lat,
     lng,
     timeMs
-  });
+  };
 
+  const speedMps = getSpeedMetersPerSecond(position, currentGpsPoint);
   const speedKmh = speedMps === null ? null : speedMps * 3.6;
+
+  latestGpsPoint = currentGpsPoint;
 
   gpsStatus.textContent = `±${Math.round(accuracyM)} m`;
   speedValue.textContent = speedKmh === null ? '-- km/h' : `${speedKmh.toFixed(1)} km/h`;
   statusText.textContent = `GPS: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+  updateDepthDisplay();
 
   const latLng: L.LatLngExpression = [lat, lng];
 
@@ -187,11 +225,27 @@ function handleGpsPosition(position: GeolocationPosition): void {
     duration: 0.5
   });
 
-  lastGpsPoint = {
-    lat,
-    lng,
-    timeMs
-  };
+  lastGpsPoint = currentGpsPoint;
+}
+
+function updateDepthDisplay(): void {
+  if (!depthRaster || !latestGpsPoint) {
+    depthValue.textContent = '-- m';
+    return;
+  }
+
+  const depthM = sampleDepthMeters(
+    depthRaster,
+    latestGpsPoint.lat,
+    latestGpsPoint.lng
+  );
+
+  if (depthM === null) {
+    depthValue.textContent = 'No data';
+    return;
+  }
+
+  depthValue.textContent = `${depthM.toFixed(1)} m`;
 }
 
 function getSpeedMetersPerSecond(
