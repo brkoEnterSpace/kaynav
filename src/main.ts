@@ -13,6 +13,9 @@ import {
   type StoredMapPackage
 } from './storage';
 
+const ACTIVE_MAP_ID_STORAGE_KEY = 'kaynav-active-map-id';
+const METERS_PER_SECOND_TO_KNOTS = 1.9438444924406;
+
 type LastGpsPoint = {
   lat: number;
   lng: number;
@@ -54,7 +57,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <section class="bottom-panel">
       <div class="metric">
         <span>Speed</span>
-        <strong id="speedValue">-- km/h</strong>
+        <strong id="speedValue">-- kt</strong>
       </div>
 
       <div class="metric">
@@ -197,6 +200,18 @@ function updateSelectedMapActions(): void {
   selectedMapActions.classList.toggle('hidden', !mapSelect.value);
 }
 
+function rememberActiveMapId(id: string): void {
+  localStorage.setItem(ACTIVE_MAP_ID_STORAGE_KEY, id);
+}
+
+function getRememberedActiveMapId(): string | null {
+  return localStorage.getItem(ACTIVE_MAP_ID_STORAGE_KEY);
+}
+
+function clearRememberedActiveMapId(): void {
+  localStorage.removeItem(ACTIVE_MAP_ID_STORAGE_KEY);
+}
+
 async function refreshSavedMaps(preferredSelectedId?: string): Promise<void> {
   savedMaps = await listMapSummaries();
 
@@ -249,6 +264,7 @@ async function openStoredMap(mapPackage: StoredMapPackage): Promise<void> {
 
   depthRaster = nextDepthRaster;
   activeMapId = mapPackage.id;
+  rememberActiveMapId(mapPackage.id);
 
   map.fitBounds(overlay.bounds, {
     padding: [20, 20]
@@ -257,6 +273,27 @@ async function openStoredMap(mapPackage: StoredMapPackage): Promise<void> {
   updateDepthDisplay();
 
   statusText.textContent = `Opened ${mapPackage.name}`;
+}
+
+async function openRememberedMapIfAvailable(): Promise<void> {
+  const rememberedMapId = getRememberedActiveMapId();
+
+  if (!rememberedMapId) {
+    return;
+  }
+
+  const rememberedMapExists = savedMaps.some((savedMap) => savedMap.id === rememberedMapId);
+
+  if (!rememberedMapExists) {
+    clearRememberedActiveMapId();
+    return;
+  }
+
+  mapSelect.value = rememberedMapId;
+  updateSelectedMapActions();
+
+  const mapPackage = await getMapPackage(rememberedMapId);
+  await openStoredMap(mapPackage);
 }
 
 menuButton.addEventListener('click', () => {
@@ -383,6 +420,10 @@ deleteMapButton.addEventListener('click', async () => {
       depthValue.textContent = '-- m';
     }
 
+    if (getRememberedActiveMapId() === selectedId) {
+      clearRememberedActiveMapId();
+    }
+
     await refreshSavedMaps();
 
     statusText.textContent = `Deleted ${selectedName}.`;
@@ -431,12 +472,12 @@ function handleGpsPosition(position: GeolocationPosition): void {
   };
 
   const speedMps = getSpeedMetersPerSecond(position, currentGpsPoint);
-  const speedKmh = speedMps === null ? null : speedMps * 3.6;
+  const speedKnots = speedMps === null ? null : speedMps * METERS_PER_SECOND_TO_KNOTS;
 
   latestGpsPoint = currentGpsPoint;
 
   gpsStatus.textContent = `±${Math.round(accuracyM)} m`;
-  speedValue.textContent = speedKmh === null ? '-- km/h' : `${speedKmh.toFixed(1)} km/h`;
+  speedValue.textContent = speedKnots === null ? '-- kt' : `${speedKnots.toFixed(1)} kt`;
 
   updateDepthDisplay();
 
@@ -543,9 +584,16 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
   return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-refreshSavedMaps().catch((error) => {
-  console.error(error);
-  statusText.textContent = 'Could not load saved maps.';
-});
+async function initializeApp(): Promise<void> {
+  try {
+    await refreshSavedMaps();
+    await openRememberedMapIfAvailable();
+  } catch (error) {
+    console.error(error);
+    statusText.textContent = 'Could not load saved maps.';
+  }
 
-startGpsAutomatically();
+  startGpsAutomatically();
+}
+
+initializeApp();
