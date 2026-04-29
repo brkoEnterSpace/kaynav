@@ -291,3 +291,59 @@ input {
 .modal-button:disabled {
   opacity: 0.6;
 }
+
+.menu-action-button.route-start {
+  background: #22c55e;
+}
+
+.menu-action-button.route-stop {
+  color: white;
+  background: #ef4444;
+}
+
+.menu-action-button:disabled {
+  opacity: 0.45;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.routes-card {
+  max-height: min(640px, 84vh);
+  display: flex;
+  flex-direction: column;
+}
+
+.routes-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  color: #e5e7eb;
+}
+
+.route-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(30, 41, 59, 0.96);
+}
+
+.route-row input {
+  width: 20px;
+  height: 20px;
+}
+
+.route-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

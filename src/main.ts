@@ -4,12 +4,18 @@ import './style.css';
 
 import { readGeoTiffAsImageOverlay } from './geotiffOverlay';
 import { type DepthRaster, readDepthRaster, sampleDepthMeters } from './depthRaster';
+
 import {
   deleteMapPackage,
   getMapPackage,
+  getRoute,
   listMapSummaries,
+  listRouteSummariesForMap,
   saveMapPackage,
+  saveRoute,
   type MapSummary,
+  type RoutePoint,
+  type RouteSummary,
   type StoredMapPackage
 } from './storage';
 
@@ -38,6 +44,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
       <div class="menu-content">
         <button id="addMapButton" class="menu-action-button">Add new map</button>
+        <button id="startRouteButton" class="menu-action-button route-start">Start</button>
+        <button id="stopRouteButton" class="menu-action-button route-stop hidden">Stop</button>
+        <button id="routesButton" class="menu-action-button">Routes</button>
 
         <select id="mapSelect" class="map-select" aria-label="Saved maps">
           <option value="">Loading saved maps...</option>
@@ -98,6 +107,21 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
       </section>
     </div>
+
+    <div id="routesModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <section class="modal-card routes-card">
+        <div class="modal-header">
+          <h2>Routes</h2>
+          <button id="closeRoutesButton" class="close-menu-button" aria-label="Close routes">
+            ×
+          </button>
+        </div>
+
+        <div id="routesList" class="routes-list">
+          No active map.
+        </div>
+      </section>
+    </div>
   </main>
 `;
 
@@ -125,6 +149,13 @@ const speedValue = document.querySelector<HTMLElement>('#speedValue')!;
 const depthValue = document.querySelector<HTMLElement>('#depthValue')!;
 const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
 
+const startRouteButton = document.querySelector<HTMLButtonElement>('#startRouteButton')!;
+const stopRouteButton = document.querySelector<HTMLButtonElement>('#stopRouteButton')!;
+const routesButton = document.querySelector<HTMLButtonElement>('#routesButton')!;
+const routesModal = document.querySelector<HTMLElement>('#routesModal')!;
+const routesList = document.querySelector<HTMLElement>('#routesList')!;
+const closeRoutesButton = document.querySelector<HTMLButtonElement>('#closeRoutesButton')!;
+
 const map = L.map('map', {
   zoomControl: false
 }).setView([45.815, 15.982], 15);
@@ -135,6 +166,14 @@ const localOverlayPane = map.getPane('localOverlayPane');
 
 if (localOverlayPane) {
   localOverlayPane.style.zIndex = '350';
+}
+
+map.createPane('routePane');
+
+const routePane = map.getPane('routePane');
+
+if (routePane) {
+  routePane.style.zIndex = '520';
 }
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -172,6 +211,12 @@ L.control
 
 let savedMaps: MapSummary[] = [];
 let activeMapId: string | null = null;
+let activeMapName: string | null = null;
+let savedRoutesForActiveMap: RouteSummary[] = [];
+let isRecordingRoute = false;
+let recordedRoutePoints: RoutePoint[] = [];
+const visibleRouteIds = new Set<string>();
+const routeOverlays = new Map<string, L.Polyline>();
 let overlayLayer: L.ImageOverlay | null = null;
 let gpsMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
@@ -245,6 +290,135 @@ async function refreshSavedMaps(preferredSelectedId?: string): Promise<void> {
   updateSelectedMapActions();
 }
 
+function setRoutesModalOpen(isOpen: boolean): void {
+  routesModal.classList.toggle('hidden', !isOpen);
+}
+
+function formatRouteTimestamp(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+
+  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+}
+
+function getRouteNameForActiveMap(): string {
+  const safeMapName = activeMapName ?? 'Map';
+  return `${safeMapName}-${formatRouteTimestamp()}`;
+}
+
+function updateRouteRecordingButtons(): void {
+  startRouteButton.classList.toggle('hidden', isRecordingRoute);
+  stopRouteButton.classList.toggle('hidden', !isRecordingRoute);
+
+  const hasActiveMap = activeMapId !== null;
+
+  startRouteButton.disabled = !hasActiveMap;
+  routesButton.disabled = !hasActiveMap;
+}
+
+function clearRouteOverlays(): void {
+  for (const polyline of routeOverlays.values()) {
+    map.removeLayer(polyline);
+  }
+
+  routeOverlays.clear();
+  visibleRouteIds.clear();
+}
+
+async function refreshRoutesForActiveMap(): Promise<void> {
+  if (!activeMapId) {
+    savedRoutesForActiveMap = [];
+    renderRoutesList();
+    return;
+  }
+
+  savedRoutesForActiveMap = await listRouteSummariesForMap(activeMapId);
+  renderRoutesList();
+}
+
+function renderRoutesList(): void {
+  routesList.innerHTML = '';
+
+  if (!activeMapId) {
+    routesList.textContent = 'Open a saved map first.';
+    return;
+  }
+
+  if (savedRoutesForActiveMap.length === 0) {
+    routesList.textContent = 'No routes recorded for this map yet.';
+    return;
+  }
+
+  for (const route of savedRoutesForActiveMap) {
+    const row = document.createElement('label');
+    row.className = 'route-row';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = visibleRouteIds.has(route.id);
+
+    checkbox.addEventListener('change', async () => {
+      if (checkbox.checked) {
+        await showRouteOverlay(route.id);
+      } else {
+        hideRouteOverlay(route.id);
+      }
+    });
+
+    const text = document.createElement('span');
+    text.textContent = `${route.name} (${route.pointCount} pts)`;
+
+    row.append(checkbox, text);
+    routesList.append(row);
+  }
+}
+
+async function showRouteOverlay(routeId: string): Promise<void> {
+  if (routeOverlays.has(routeId)) {
+    visibleRouteIds.add(routeId);
+    return;
+  }
+
+  const route = await getRoute(routeId);
+
+  if (!activeMapId || route.mapId !== activeMapId) {
+    return;
+  }
+
+  const latLngs = route.points.map((point) => [point.lat, point.lng] as L.LatLngExpression);
+
+  if (latLngs.length < 2) {
+    return;
+  }
+
+  const polyline = L.polyline(latLngs, {
+    pane: 'routePane',
+    color: '#f97316',
+    weight: 5,
+    opacity: 0.95
+  }).addTo(map);
+
+  routeOverlays.set(routeId, polyline);
+  visibleRouteIds.add(routeId);
+}
+
+function hideRouteOverlay(routeId: string): void {
+  const polyline = routeOverlays.get(routeId);
+
+  if (polyline) {
+    map.removeLayer(polyline);
+  }
+
+  routeOverlays.delete(routeId);
+  visibleRouteIds.delete(routeId);
+}
+
 async function openStoredMap(mapPackage: StoredMapPackage): Promise<void> {
   statusText.textContent = `Opening ${mapPackage.name}...`;
 
@@ -262,9 +436,15 @@ async function openStoredMap(mapPackage: StoredMapPackage): Promise<void> {
     pane: 'localOverlayPane'
   }).addTo(map);
 
+  clearRouteOverlays();
+
   depthRaster = nextDepthRaster;
   activeMapId = mapPackage.id;
+  activeMapName = mapPackage.name;
   rememberActiveMapId(mapPackage.id);
+  updateRouteRecordingButtons();
+
+  await refreshRoutesForActiveMap();
 
   map.fitBounds(overlay.bounds, {
     padding: [20, 20]
@@ -327,6 +507,75 @@ newOverlayInput.addEventListener('change', () => {
 newDepthInput.addEventListener('change', () => {
   depthFileName.textContent =
     newDepthInput.files?.[0]?.name ?? 'No depth raster selected';
+});
+
+startRouteButton.addEventListener('click', () => {
+  if (!activeMapId || !activeMapName) {
+    statusText.textContent = 'Open a saved map before recording a route.';
+    return;
+  }
+
+  isRecordingRoute = true;
+  recordedRoutePoints = [];
+  updateRouteRecordingButtons();
+
+  statusText.textContent = `Recording route for ${activeMapName}...`;
+  setMenuOpen(false);
+});
+
+stopRouteButton.addEventListener('click', async () => {
+  if (!isRecordingRoute) return;
+
+  isRecordingRoute = false;
+  updateRouteRecordingButtons();
+
+  if (!activeMapId || !activeMapName) {
+    recordedRoutePoints = [];
+    statusText.textContent = 'No active map. Route was not saved.';
+    return;
+  }
+
+  if (recordedRoutePoints.length < 2) {
+    recordedRoutePoints = [];
+    statusText.textContent = 'Route too short. Nothing saved.';
+    return;
+  }
+
+  const routeName = getRouteNameForActiveMap();
+
+  try {
+    const savedRoute = await saveRoute({
+      mapId: activeMapId,
+      mapName: activeMapName,
+      name: routeName,
+      points: recordedRoutePoints
+    });
+
+    recordedRoutePoints = [];
+    await refreshRoutesForActiveMap();
+
+    statusText.textContent = `Saved route ${savedRoute.name}.`;
+  } catch (error) {
+    console.error(error);
+    recordedRoutePoints = [];
+    statusText.textContent =
+      error instanceof Error ? error.message : 'Could not save route.';
+  }
+});
+
+routesButton.addEventListener('click', async () => {
+  await refreshRoutesForActiveMap();
+  setRoutesModalOpen(true);
+});
+
+closeRoutesButton.addEventListener('click', () => {
+  setRoutesModalOpen(false);
+});
+
+routesModal.addEventListener('click', (event) => {
+  if (event.target === routesModal) {
+    setRoutesModalOpen(false);
+  }
 });
 
 saveMapButton.addEventListener('click', async () => {
@@ -417,7 +666,10 @@ deleteMapButton.addEventListener('click', async () => {
 
       depthRaster = null;
       activeMapId = null;
+      activeMapName = null;
       depthValue.textContent = '-- m';
+      clearRouteOverlays();
+      updateRouteRecordingButtons();
     }
 
     if (getRememberedActiveMapId() === selectedId) {
@@ -475,6 +727,15 @@ function handleGpsPosition(position: GeolocationPosition): void {
   const speedKnots = speedMps === null ? null : speedMps * METERS_PER_SECOND_TO_KNOTS;
 
   latestGpsPoint = currentGpsPoint;
+  if (isRecordingRoute && activeMapId) {
+    recordedRoutePoints.push({
+      lat,
+      lng,
+      timeMs,
+      accuracyM,
+      speedMps
+    });
+  }
 
   gpsStatus.textContent = `±${Math.round(accuracyM)} m`;
   speedValue.textContent = speedKnots === null ? '-- kt' : `${speedKnots.toFixed(1)} kt`;
@@ -585,9 +846,12 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 }
 
 async function initializeApp(): Promise<void> {
+  updateRouteRecordingButtons();
+
   try {
     await refreshSavedMaps();
     await openRememberedMapIfAvailable();
+    updateRouteRecordingButtons();
   } catch (error) {
     console.error(error);
     statusText.textContent = 'Could not load saved maps.';
