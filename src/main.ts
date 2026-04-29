@@ -69,10 +69,36 @@ const map = L.map('map', {
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 // Optional online background. Your imported GeoTIFF still works without internet.
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 22,
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
+const baseLayers = {
+  osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 22,
+    attribution: '&copy; OpenStreetMap contributors'
+  }),
+
+  satellite: L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {
+      maxZoom: 19,
+      attribution:
+        'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+    }
+  )
+};
+
+baseLayers.satellite.addTo(map);
+
+L.control
+  .layers(
+    {
+      Satellite: baseLayers.satellite,
+      OpenStreetMap: baseLayers.osm
+    },
+    {},
+    {
+      position: 'topright'
+    }
+  )
+  .addTo(map);
 
 let overlayLayer: L.ImageOverlay | null = null;
 let gpsMarker: L.CircleMarker | null = null;
