@@ -14,7 +14,11 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <main class="app">
     <div id="map"></div>
 
-    <section class="top-panel">
+    <button id="menuButton" class="menu-button" aria-label="Open menu" aria-expanded="false">
+      ☰
+    </button>
+
+    <section id="topPanel" class="top-panel hidden">
       <div>
         <div class="app-title">KayNav</div>
         <div id="statusText" class="status-text">Import map and depth files.</div>
@@ -30,6 +34,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           Depth
           <input id="depthInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
         </label>
+
+        <button id="closeMenuButton" class="close-menu-button" aria-label="Close menu">
+          ×
+        </button>
       </div>
     </section>
 
@@ -59,6 +67,22 @@ const depthInput = document.querySelector<HTMLInputElement>('#depthInput')!;
 const speedValue = document.querySelector<HTMLElement>('#speedValue')!;
 const depthValue = document.querySelector<HTMLElement>('#depthValue')!;
 const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
+const menuButton = document.querySelector<HTMLButtonElement>('#menuButton')!;
+const closeMenuButton = document.querySelector<HTMLButtonElement>('#closeMenuButton')!;
+const topPanel = document.querySelector<HTMLElement>('#topPanel')!;
+
+function setMenuOpen(isOpen: boolean): void {
+  topPanel.classList.toggle('hidden', !isOpen);
+  menuButton.setAttribute('aria-expanded', String(isOpen));
+}
+
+menuButton.addEventListener('click', () => {
+  setMenuOpen(topPanel.classList.contains('hidden'));
+});
+
+closeMenuButton.addEventListener('click', () => {
+  setMenuOpen(false);
+});
 
 const map = L.map('map', {
   zoomControl: false

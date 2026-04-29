@@ -37,19 +37,19 @@ input {
 
 .top-panel {
   position: absolute;
-  top: max(12px, env(safe-area-inset-top));
-  left: 12px;
-  right: 12px;
-  z-index: 10;
+  top: calc(max(10px, env(safe-area-inset-top)) + 54px);
+  left: 10px;
+  right: 10px;
+  z-index: 35;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 18px;
-  background: rgba(15, 23, 42, 0.92);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(12px);
+  gap: 8px;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
 }
 
 .app-title {
@@ -130,4 +130,36 @@ input {
 
 .leaflet-control-attribution {
   font-size: 10px;
+}
+
+.menu-button {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 10px;
+  z-index: 40;
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 14px;
+  color: white;
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  font-size: 1.6rem;
+  font-weight: 900;
+}
+
+.hidden {
+  display: none;
+}
+
+.close-menu-button {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 14px;
+  color: white;
+  background: rgba(51, 65, 85, 0.95);
+  font-size: 1.5rem;
+  font-weight: 900;
 }
