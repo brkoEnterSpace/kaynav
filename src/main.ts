@@ -37,11 +37,6 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </button>
 
     <section id="topPanel" class="top-panel hidden">
-      <div>
-        <div class="app-title">KayNav</div>
-        <div id="statusText" class="status-text">Choose a saved map or add a new one.</div>
-      </div>
-
       <div class="menu-content">
         <button id="addMapButton" class="menu-action-button">Add new map</button>
         <button id="startRouteButton" class="menu-action-button route-start">Start</button>
@@ -62,6 +57,12 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </button>
       </div>
     </section>
+
+    <div id="statusText" class="status-text hidden">Ready.</div>
+
+    <div id="recordingBanner" class="recording-banner hidden">
+      RECORDING
+    </div>
 
     <section class="bottom-panel">
       <div class="metric">
@@ -156,6 +157,8 @@ const routesModal = document.querySelector<HTMLElement>('#routesModal')!;
 const routesList = document.querySelector<HTMLElement>('#routesList')!;
 const closeRoutesButton = document.querySelector<HTMLButtonElement>('#closeRoutesButton')!;
 
+const recordingBanner = document.querySelector<HTMLElement>('#recordingBanner')!;
+
 const map = L.map('map', {
   zoomControl: false
 }).setView([45.815, 15.982], 15);
@@ -174,6 +177,14 @@ const routePane = map.getPane('routePane');
 
 if (routePane) {
   routePane.style.zIndex = '520';
+}
+
+map.createPane('gpsPane');
+
+const gpsPane = map.getPane('gpsPane');
+
+if (gpsPane) {
+  gpsPane.style.zIndex = '650';
 }
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -217,6 +228,7 @@ let isRecordingRoute = false;
 let recordedRoutePoints: RoutePoint[] = [];
 const visibleRouteIds = new Set<string>();
 const routeOverlays = new Map<string, L.Polyline>();
+let liveRouteOverlay: L.Polyline | null = null;
 let overlayLayer: L.ImageOverlay | null = null;
 let gpsMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
@@ -315,6 +327,7 @@ function getRouteNameForActiveMap(): string {
 function updateRouteRecordingButtons(): void {
   startRouteButton.classList.toggle('hidden', isRecordingRoute);
   stopRouteButton.classList.toggle('hidden', !isRecordingRoute);
+  recordingBanner.classList.toggle('hidden', !isRecordingRoute);
 
   const hasActiveMap = activeMapId !== null;
 
@@ -329,6 +342,11 @@ function clearRouteOverlays(): void {
 
   routeOverlays.clear();
   visibleRouteIds.clear();
+
+  if (liveRouteOverlay) {
+    map.removeLayer(liveRouteOverlay);
+    liveRouteOverlay = null;
+  }
 }
 
 async function refreshRoutesForActiveMap(): Promise<void> {
@@ -517,6 +535,18 @@ startRouteButton.addEventListener('click', () => {
 
   isRecordingRoute = true;
   recordedRoutePoints = [];
+
+  if (liveRouteOverlay) {
+    map.removeLayer(liveRouteOverlay);
+  }
+
+  liveRouteOverlay = L.polyline([], {
+    pane: 'routePane',
+    color: '#22c55e',
+    weight: 6,
+    opacity: 0.95
+  }).addTo(map);
+
   updateRouteRecordingButtons();
 
   statusText.textContent = `Recording route for ${activeMapName}...`;
@@ -528,6 +558,10 @@ stopRouteButton.addEventListener('click', async () => {
 
   isRecordingRoute = false;
   updateRouteRecordingButtons();
+  if (liveRouteOverlay) {
+    map.removeLayer(liveRouteOverlay);
+    liveRouteOverlay = null;
+  }
 
   if (!activeMapId || !activeMapName) {
     recordedRoutePoints = [];
@@ -553,6 +587,8 @@ stopRouteButton.addEventListener('click', async () => {
 
     recordedRoutePoints = [];
     await refreshRoutesForActiveMap();
+    await showRouteOverlay(savedRoute.id);
+    renderRoutesList();
 
     statusText.textContent = `Saved route ${savedRoute.name}.`;
   } catch (error) {
@@ -728,13 +764,19 @@ function handleGpsPosition(position: GeolocationPosition): void {
 
   latestGpsPoint = currentGpsPoint;
   if (isRecordingRoute && activeMapId) {
-    recordedRoutePoints.push({
+    const routePoint: RoutePoint = {
       lat,
       lng,
       timeMs,
       accuracyM,
       speedMps
-    });
+    };
+
+    recordedRoutePoints.push(routePoint);
+
+    if (liveRouteOverlay) {
+      liveRouteOverlay.addLatLng([lat, lng]);
+    }
   }
 
   gpsStatus.textContent = `±${Math.round(accuracyM)} m`;
@@ -746,6 +788,7 @@ function handleGpsPosition(position: GeolocationPosition): void {
 
   if (!gpsMarker) {
     gpsMarker = L.circleMarker(latLng, {
+      pane: 'gpsPane',
       radius: 8,
       color: '#ffffff',
       weight: 3,
@@ -758,6 +801,7 @@ function handleGpsPosition(position: GeolocationPosition): void {
 
   if (!accuracyCircle) {
     accuracyCircle = L.circle(latLng, {
+      pane: 'gpsPane',
       radius: accuracyM,
       color: '#38bdf8',
       weight: 1,
