@@ -40,7 +40,7 @@ function readNoDataValue(image: unknown): number | null {
   return Number.isFinite(numericNoData) ? numericNoData : null;
 }
 
-export async function readDepthRaster(file: File): Promise<DepthRaster> {
+export async function readDepthRaster(file: Blob): Promise<DepthRaster> {
   const buffer = await file.arrayBuffer();
   const tiff = await fromArrayBuffer(buffer);
   const image = await tiff.getImage();

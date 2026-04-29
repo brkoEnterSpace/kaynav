@@ -1,8 +1,17 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
+
 import { readGeoTiffAsImageOverlay } from './geotiffOverlay';
 import { type DepthRaster, readDepthRaster, sampleDepthMeters } from './depthRaster';
+import {
+  deleteMapPackage,
+  getMapPackage,
+  listMapSummaries,
+  saveMapPackage,
+  type MapSummary,
+  type StoredMapPackage
+} from './storage';
 
 type LastGpsPoint = {
   lat: number;
@@ -21,19 +30,20 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <section id="topPanel" class="top-panel hidden">
       <div>
         <div class="app-title">KayNav</div>
-        <div id="statusText" class="status-text">Import map and depth files.</div>
+        <div id="statusText" class="status-text">Choose a saved map or add a new one.</div>
       </div>
 
-      <div class="file-actions">
-        <label class="file-button">
-          Map
-          <input id="overlayInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
-        </label>
+      <div class="menu-content">
+        <button id="addMapButton" class="menu-action-button">Add new map</button>
 
-        <label class="file-button secondary">
-          Depth
-          <input id="depthInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
-        </label>
+        <select id="mapSelect" class="map-select" aria-label="Saved maps">
+          <option value="">Loading saved maps...</option>
+        </select>
+
+        <div id="selectedMapActions" class="selected-map-actions hidden">
+          <button id="openMapButton" class="menu-action-button">Open</button>
+          <button id="deleteMapButton" class="menu-action-button danger">Delete</button>
+        </div>
 
         <button id="closeMenuButton" class="close-menu-button" aria-label="Close menu">
           ×
@@ -56,39 +66,68 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <span>GPS</span>
         <strong id="gpsStatus">Off</strong>
       </div>
-
     </section>
+
+    <div id="addMapModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <section class="modal-card">
+        <h2>Add new map</h2>
+
+        <label class="form-field">
+          <span>Map name</span>
+          <input id="mapNameInput" type="text" placeholder="Example: House test map" />
+        </label>
+
+        <label class="file-picker">
+          <span>Choose map overlay GeoTIFF</span>
+          <input id="newOverlayInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
+        </label>
+        <div id="overlayFileName" class="picked-file">No map overlay selected</div>
+
+        <label class="file-picker secondary">
+          <span>Choose depth GeoTIFF</span>
+          <input id="newDepthInput" type="file" accept=".tif,.tiff,.geotiff,image/tiff" />
+        </label>
+        <div id="depthFileName" class="picked-file">No depth raster selected</div>
+
+        <div class="modal-actions">
+          <button id="cancelAddMapButton" class="modal-button muted">Cancel</button>
+          <button id="saveMapButton" class="modal-button primary">Save map</button>
+        </div>
+      </section>
+    </div>
   </main>
 `;
 
 const statusText = document.querySelector<HTMLElement>('#statusText')!;
-const overlayInput = document.querySelector<HTMLInputElement>('#overlayInput')!;
-const depthInput = document.querySelector<HTMLInputElement>('#depthInput')!;
-const speedValue = document.querySelector<HTMLElement>('#speedValue')!;
-const depthValue = document.querySelector<HTMLElement>('#depthValue')!;
-const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
 const menuButton = document.querySelector<HTMLButtonElement>('#menuButton')!;
 const closeMenuButton = document.querySelector<HTMLButtonElement>('#closeMenuButton')!;
 const topPanel = document.querySelector<HTMLElement>('#topPanel')!;
 
-function setMenuOpen(isOpen: boolean): void {
-  topPanel.classList.toggle('hidden', !isOpen);
-  menuButton.setAttribute('aria-expanded', String(isOpen));
-}
+const addMapButton = document.querySelector<HTMLButtonElement>('#addMapButton')!;
+const mapSelect = document.querySelector<HTMLSelectElement>('#mapSelect')!;
+const selectedMapActions = document.querySelector<HTMLElement>('#selectedMapActions')!;
+const openMapButton = document.querySelector<HTMLButtonElement>('#openMapButton')!;
+const deleteMapButton = document.querySelector<HTMLButtonElement>('#deleteMapButton')!;
 
-menuButton.addEventListener('click', () => {
-  setMenuOpen(topPanel.classList.contains('hidden'));
-});
+const addMapModal = document.querySelector<HTMLElement>('#addMapModal')!;
+const mapNameInput = document.querySelector<HTMLInputElement>('#mapNameInput')!;
+const newOverlayInput = document.querySelector<HTMLInputElement>('#newOverlayInput')!;
+const newDepthInput = document.querySelector<HTMLInputElement>('#newDepthInput')!;
+const overlayFileName = document.querySelector<HTMLElement>('#overlayFileName')!;
+const depthFileName = document.querySelector<HTMLElement>('#depthFileName')!;
+const cancelAddMapButton = document.querySelector<HTMLButtonElement>('#cancelAddMapButton')!;
+const saveMapButton = document.querySelector<HTMLButtonElement>('#saveMapButton')!;
 
-closeMenuButton.addEventListener('click', () => {
-  setMenuOpen(false);
-});
+const speedValue = document.querySelector<HTMLElement>('#speedValue')!;
+const depthValue = document.querySelector<HTMLElement>('#depthValue')!;
+const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
 
 const map = L.map('map', {
   zoomControl: false
 }).setView([45.815, 15.982], 15);
 
 map.createPane('localOverlayPane');
+
 const localOverlayPane = map.getPane('localOverlayPane');
 
 if (localOverlayPane) {
@@ -97,7 +136,6 @@ if (localOverlayPane) {
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-// Optional online background. Your imported GeoTIFF still works without internet.
 const baseLayers = {
   osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 22,
@@ -129,6 +167,8 @@ L.control
   )
   .addTo(map);
 
+let savedMaps: MapSummary[] = [];
+let activeMapId: string | null = null;
 let overlayLayer: L.ImageOverlay | null = null;
 let gpsMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
@@ -136,57 +176,220 @@ let lastGpsPoint: LastGpsPoint | null = null;
 let latestGpsPoint: LastGpsPoint | null = null;
 let depthRaster: DepthRaster | null = null;
 
-overlayInput.addEventListener('change', async () => {
-  const file = overlayInput.files?.[0];
+function setMenuOpen(isOpen: boolean): void {
+  topPanel.classList.toggle('hidden', !isOpen);
+  menuButton.setAttribute('aria-expanded', String(isOpen));
+}
 
-  if (!file) return;
+function setAddMapModalOpen(isOpen: boolean): void {
+  addMapModal.classList.toggle('hidden', !isOpen);
+}
 
-  try {
-    statusText.textContent = 'Reading map overlay...';
+function resetAddMapModal(): void {
+  mapNameInput.value = '';
+  newOverlayInput.value = '';
+  newDepthInput.value = '';
+  overlayFileName.textContent = 'No map overlay selected';
+  depthFileName.textContent = 'No depth raster selected';
+}
 
-    const overlay = await readGeoTiffAsImageOverlay(file);
+function updateSelectedMapActions(): void {
+  selectedMapActions.classList.toggle('hidden', !mapSelect.value);
+}
 
-    if (overlayLayer) {
-      map.removeLayer(overlayLayer);
-      overlayLayer = null;
-    }
+async function refreshSavedMaps(preferredSelectedId?: string): Promise<void> {
+  savedMaps = await listMapSummaries();
 
-    overlayLayer = L.imageOverlay(overlay.imageUrl, overlay.bounds, {
-      opacity: 1,
-      interactive: false,
-      pane: 'localOverlayPane'
-    }).addTo(map);
+  mapSelect.innerHTML = '';
 
-    map.fitBounds(overlay.bounds, {
-      padding: [20, 20]
-    });
+  if (savedMaps.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No saved maps yet';
+    mapSelect.append(option);
+    updateSelectedMapActions();
+    return;
+  }
 
-    statusText.textContent = `Loaded map: ${file.name}`;
-  } catch (error) {
-    console.error(error);
-    statusText.textContent =
-      error instanceof Error ? error.message : 'Could not load map overlay.';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Choose saved map';
+  mapSelect.append(placeholder);
+
+  for (const savedMap of savedMaps) {
+    const option = document.createElement('option');
+    option.value = savedMap.id;
+    option.textContent = savedMap.name;
+    mapSelect.append(option);
+  }
+
+  if (preferredSelectedId) {
+    mapSelect.value = preferredSelectedId;
+  }
+
+  updateSelectedMapActions();
+}
+
+async function openStoredMap(mapPackage: StoredMapPackage): Promise<void> {
+  statusText.textContent = `Opening ${mapPackage.name}...`;
+
+  const overlay = await readGeoTiffAsImageOverlay(mapPackage.overlayBlob);
+  const nextDepthRaster = await readDepthRaster(mapPackage.depthBlob);
+
+  if (overlayLayer) {
+    map.removeLayer(overlayLayer);
+    overlayLayer = null;
+  }
+
+  overlayLayer = L.imageOverlay(overlay.imageUrl, overlay.bounds, {
+    opacity: 1,
+    interactive: false,
+    pane: 'localOverlayPane'
+  }).addTo(map);
+
+  depthRaster = nextDepthRaster;
+  activeMapId = mapPackage.id;
+
+  map.fitBounds(overlay.bounds, {
+    padding: [20, 20]
+  });
+
+  updateDepthDisplay();
+
+  statusText.textContent = `Opened ${mapPackage.name}`;
+}
+
+menuButton.addEventListener('click', () => {
+  setMenuOpen(topPanel.classList.contains('hidden'));
+});
+
+closeMenuButton.addEventListener('click', () => {
+  setMenuOpen(false);
+});
+
+addMapButton.addEventListener('click', () => {
+  resetAddMapModal();
+  setAddMapModalOpen(true);
+});
+
+cancelAddMapButton.addEventListener('click', () => {
+  setAddMapModalOpen(false);
+});
+
+addMapModal.addEventListener('click', (event) => {
+  if (event.target === addMapModal) {
+    setAddMapModalOpen(false);
   }
 });
 
-depthInput.addEventListener('change', async () => {
-  const file = depthInput.files?.[0];
+newOverlayInput.addEventListener('change', () => {
+  overlayFileName.textContent =
+    newOverlayInput.files?.[0]?.name ?? 'No map overlay selected';
+});
 
-  if (!file) return;
+newDepthInput.addEventListener('change', () => {
+  depthFileName.textContent =
+    newDepthInput.files?.[0]?.name ?? 'No depth raster selected';
+});
+
+saveMapButton.addEventListener('click', async () => {
+  const name = mapNameInput.value.trim();
+  const overlayFile = newOverlayInput.files?.[0];
+  const depthFile = newDepthInput.files?.[0];
+
+  if (!name) {
+    statusText.textContent = 'Enter a map name.';
+    return;
+  }
+
+  if (!overlayFile) {
+    statusText.textContent = 'Choose a map overlay GeoTIFF.';
+    return;
+  }
+
+  if (!depthFile) {
+    statusText.textContent = 'Choose a depth GeoTIFF.';
+    return;
+  }
 
   try {
-    statusText.textContent = 'Reading depth raster...';
+    saveMapButton.disabled = true;
+    statusText.textContent = `Saving ${name}...`;
 
-    depthRaster = await readDepthRaster(file);
+    const savedMap = await saveMapPackage({
+      name,
+      overlayBlob: overlayFile,
+      depthBlob: depthFile
+    });
 
-    statusText.textContent = `Loaded depth: ${file.name}`;
-    updateDepthDisplay();
+    await refreshSavedMaps(savedMap.id);
+
+    setAddMapModalOpen(false);
+    statusText.textContent = `Saved ${name}.`;
   } catch (error) {
     console.error(error);
-    depthRaster = null;
-    depthValue.textContent = '-- m';
     statusText.textContent =
-      error instanceof Error ? error.message : 'Could not load depth raster.';
+      error instanceof Error ? error.message : 'Could not save map.';
+  } finally {
+    saveMapButton.disabled = false;
+  }
+});
+
+mapSelect.addEventListener('change', () => {
+  updateSelectedMapActions();
+});
+
+openMapButton.addEventListener('click', async () => {
+  const selectedId = mapSelect.value;
+
+  if (!selectedId) return;
+
+  try {
+    const mapPackage = await getMapPackage(selectedId);
+    await openStoredMap(mapPackage);
+    setMenuOpen(false);
+  } catch (error) {
+    console.error(error);
+    statusText.textContent =
+      error instanceof Error ? error.message : 'Could not open saved map.';
+  }
+});
+
+deleteMapButton.addEventListener('click', async () => {
+  const selectedId = mapSelect.value;
+
+  if (!selectedId) return;
+
+  const selectedMap = savedMaps.find((item) => item.id === selectedId);
+  const selectedName = selectedMap?.name ?? 'this map';
+
+  const confirmed = window.confirm(
+    `Are you sure you want to delete "${selectedName}"?\n\nThis removes the locally saved map and depth files from KayNav.`
+  );
+
+  if (!confirmed) return;
+
+  try {
+    await deleteMapPackage(selectedId);
+
+    if (activeMapId === selectedId) {
+      if (overlayLayer) {
+        map.removeLayer(overlayLayer);
+        overlayLayer = null;
+      }
+
+      depthRaster = null;
+      activeMapId = null;
+      depthValue.textContent = '-- m';
+    }
+
+    await refreshSavedMaps();
+
+    statusText.textContent = `Deleted ${selectedName}.`;
+  } catch (error) {
+    console.error(error);
+    statusText.textContent =
+      error instanceof Error ? error.message : 'Could not delete map.';
   }
 });
 
@@ -234,7 +437,6 @@ function handleGpsPosition(position: GeolocationPosition): void {
 
   gpsStatus.textContent = `±${Math.round(accuracyM)} m`;
   speedValue.textContent = speedKmh === null ? '-- km/h' : `${speedKmh.toFixed(1)} km/h`;
-  statusText.textContent = `GPS: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 
   updateDepthDisplay();
 
@@ -318,7 +520,6 @@ function getSpeedMetersPerSecond(
     currentPoint.lng
   );
 
-  // Ignore tiny GPS jitter.
   if (meters < 1.5) {
     return 0;
   }
@@ -341,5 +542,10 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 
   return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+refreshSavedMaps().catch((error) => {
+  console.error(error);
+  statusText.textContent = 'Could not load saved maps.';
+});
 
 startGpsAutomatically();

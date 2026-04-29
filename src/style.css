@@ -150,7 +150,7 @@ input {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .close-menu-button {
@@ -162,4 +162,132 @@ input {
   background: rgba(51, 65, 85, 0.95);
   font-size: 1.5rem;
   font-weight: 900;
+}
+
+.menu-content {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  min-width: min(260px, 60vw);
+}
+
+.menu-action-button,
+.map-select,
+.modal-button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 14px;
+  padding: 0 12px;
+  font-weight: 850;
+}
+
+.menu-action-button {
+  color: #020617;
+  background: #38bdf8;
+}
+
+.menu-action-button.danger {
+  color: white;
+  background: #ef4444;
+}
+
+.map-select {
+  width: 100%;
+  color: #e5e7eb;
+  background: rgba(30, 41, 59, 0.98);
+}
+
+.selected-map-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.modal-card {
+  width: min(440px, 100%);
+  padding: 18px;
+  border-radius: 22px;
+  color: #e5e7eb;
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.55);
+}
+
+.modal-card h2 {
+  margin: 0 0 16px;
+}
+
+.form-field,
+.file-picker {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  font-weight: 750;
+}
+
+.form-field input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 14px;
+  padding: 0 12px;
+  color: #e5e7eb;
+  background: rgba(30, 41, 59, 0.98);
+}
+
+.file-picker {
+  min-height: 48px;
+  align-content: center;
+  border-radius: 14px;
+  padding: 12px;
+  color: #020617;
+  background: #38bdf8;
+}
+
+.file-picker.secondary {
+  background: #a78bfa;
+}
+
+.file-picker input {
+  display: none;
+}
+
+.picked-file {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.modal-button.primary {
+  color: #020617;
+  background: #22c55e;
+}
+
+.modal-button.muted {
+  color: #e5e7eb;
+  background: rgba(51, 65, 85, 0.95);
+}
+
+.modal-button:disabled {
+  opacity: 0.6;
 }

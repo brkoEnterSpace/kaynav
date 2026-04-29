@@ -68,7 +68,7 @@ function validateWgs84Bounds(bbox: number[]): void {
   }
 }
 
-export async function readGeoTiffAsImageOverlay(file: File): Promise<GeoTiffOverlay> {
+export async function readGeoTiffAsImageOverlay(file: Blob): Promise<GeoTiffOverlay> {
   const buffer = await file.arrayBuffer();
   const tiff = await fromArrayBuffer(buffer);
   const image = await tiff.getImage();
