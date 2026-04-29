@@ -95,50 +95,37 @@ input {
 
 .bottom-panel {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 10;
+  left: 14px;
+  right: 14px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 20;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 10px;
-  border-radius: 20px;
-  background: rgba(15, 23, 42, 0.92);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(12px);
+  grid-template-columns: 1fr;
+  gap: 4px;
+  pointer-events: none;
 }
 
 .metric {
-  min-width: 0;
-  padding: 10px;
-  border-radius: 14px;
-  background: rgba(30, 41, 59, 0.95);
+  padding: 0;
+  background: transparent;
 }
 
 .metric span {
-  display: block;
-  margin-bottom: 4px;
-  color: #94a3b8;
-  font-size: 0.72rem;
+  display: inline;
+  margin-right: 8px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 800;
+  text-shadow: 0 2px 8px black;
 }
 
 .metric strong {
-  display: block;
-  overflow: hidden;
-  font-size: 1.05rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#startGpsButton {
-  grid-column: 1 / -1;
-  min-height: 48px;
-  border: 0;
-  border-radius: 16px;
-  color: #020617;
-  background: #22c55e;
-  font-weight: 900;
+  display: inline;
+  color: white;
+  font-size: 2rem;
+  font-weight: 950;
+  line-height: 1.05;
+  text-shadow: 0 2px 10px black;
 }
 
 .leaflet-control-attribution {

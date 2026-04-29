@@ -49,7 +49,6 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <strong id="gpsStatus">Off</strong>
       </div>
 
-      <button id="startGpsButton">Start GPS</button>
     </section>
   </main>
 `;
@@ -57,7 +56,6 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 const statusText = document.querySelector<HTMLElement>('#statusText')!;
 const overlayInput = document.querySelector<HTMLInputElement>('#overlayInput')!;
 const depthInput = document.querySelector<HTMLInputElement>('#depthInput')!;
-const startGpsButton = document.querySelector<HTMLButtonElement>('#startGpsButton')!;
 const speedValue = document.querySelector<HTMLElement>('#speedValue')!;
 const depthValue = document.querySelector<HTMLElement>('#depthValue')!;
 const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
@@ -65,6 +63,13 @@ const gpsStatus = document.querySelector<HTMLElement>('#gpsStatus')!;
 const map = L.map('map', {
   zoomControl: false
 }).setView([45.815, 15.982], 15);
+
+map.createPane('localOverlayPane');
+const localOverlayPane = map.getPane('localOverlayPane');
+
+if (localOverlayPane) {
+  localOverlayPane.style.zIndex = '350';
+}
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -105,7 +110,6 @@ let gpsMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
 let lastGpsPoint: LastGpsPoint | null = null;
 let latestGpsPoint: LastGpsPoint | null = null;
-let watchId: number | null = null;
 let depthRaster: DepthRaster | null = null;
 
 overlayInput.addEventListener('change', async () => {
@@ -125,7 +129,8 @@ overlayInput.addEventListener('change', async () => {
 
     overlayLayer = L.imageOverlay(overlay.imageUrl, overlay.bounds, {
       opacity: 1,
-      interactive: false
+      interactive: false,
+      pane: 'localOverlayPane'
     }).addTo(map);
 
     map.fitBounds(overlay.bounds, {
@@ -161,15 +166,7 @@ depthInput.addEventListener('change', async () => {
   }
 });
 
-startGpsButton.addEventListener('click', () => {
-  if (watchId !== null) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-    startGpsButton.textContent = 'Start GPS';
-    gpsStatus.textContent = 'Off';
-    return;
-  }
-
+function startGpsAutomatically(): void {
   if (!navigator.geolocation) {
     gpsStatus.textContent = 'Unsupported';
     statusText.textContent = 'GPS is not supported in this browser.';
@@ -177,13 +174,13 @@ startGpsButton.addEventListener('click', () => {
   }
 
   gpsStatus.textContent = 'Starting...';
-  statusText.textContent = 'Requesting GPS permission...';
+  statusText.textContent = 'Starting GPS...';
 
-  watchId = navigator.geolocation.watchPosition(
+  navigator.geolocation.watchPosition(
     handleGpsPosition,
     (error) => {
       console.error(error);
-      gpsStatus.textContent = 'Error';
+      gpsStatus.textContent = 'GPS error';
       statusText.textContent = error.message;
     },
     {
@@ -192,9 +189,7 @@ startGpsButton.addEventListener('click', () => {
       timeout: 10000
     }
   );
-
-  startGpsButton.textContent = 'Stop GPS';
-});
+}
 
 function handleGpsPosition(position: GeolocationPosition): void {
   const lat = position.coords.latitude;
@@ -322,3 +317,5 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 
   return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+startGpsAutomatically();
