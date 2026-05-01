@@ -66,6 +66,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <button id="menuButton" class="menu-button" aria-label="Open menu" aria-expanded="false">
       ☰
     </button>
+    <button id="locateButton" class="locate-button active" aria-label="Center on my location">
+      ⌖
+    </button>
     <button id="cancelRangeButton" class="cancel-range-button hidden" aria-label="Exit range mode">
       ×
     </button>
@@ -200,6 +203,7 @@ const rangeSelect = document.querySelector<HTMLSelectElement>('#rangeSelect')!;
 const startRangeButton = document.querySelector<HTMLButtonElement>('#startRangeButton')!;
 const cancelRangeModalButton = document.querySelector<HTMLButtonElement>('#cancelRangeModalButton')!;
 const cancelRangeButton = document.querySelector<HTMLButtonElement>('#cancelRangeButton')!;
+const locateButton = document.querySelector<HTMLButtonElement>('#locateButton')!;
 
 const map = L.map('map', {
   zoomControl: false
@@ -238,6 +242,11 @@ if (rangePane) {
 }
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+map.on('dragstart', () => {
+  isFollowingLocation = false;
+  updateLocateButtonState();
+});
 
 const baseLayers = {
   osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -292,6 +301,7 @@ let rangeCircle: L.Circle | null = null;
 let rangeLabel: L.Marker | null = null;
 let rangeMaxDepthLine: L.Polyline | null = null;
 let rangeMaxDepthDot: L.CircleMarker | null = null;
+let isFollowingLocation = true;
 
 function setMenuOpen(isOpen: boolean): void {
   topPanel.classList.toggle('hidden', !isOpen);
@@ -455,6 +465,24 @@ function showRangeAtPoint(lat: number, lng: number): void {
     icon: labelIcon,
     interactive: false
   }).addTo(map);
+}
+
+function updateLocateButtonState(): void {
+  locateButton.classList.toggle('active', isFollowingLocation);
+}
+
+function centerMapOnCurrentLocation(): void {
+  if (!latestGpsPoint) {
+    statusText.textContent = 'Waiting for GPS position...';
+    return;
+  }
+
+  isFollowingLocation = true;
+  updateLocateButtonState();
+
+  map.setView([latestGpsPoint.lat, latestGpsPoint.lng], Math.max(map.getZoom(), 17), {
+    animate: true
+  });
 }
 
 async function refreshSavedMaps(preferredSelectedId?: string): Promise<void> {
@@ -939,6 +967,10 @@ cancelRangeButton.addEventListener('click', () => {
   stopRangeMode();
 });
 
+locateButton.addEventListener('click', () => {
+  centerMapOnCurrentLocation();
+});
+
 map.on('click', (event) => {
   if (!isRangeModeActive) {
     return;
@@ -1038,10 +1070,12 @@ function handleGpsPosition(position: GeolocationPosition): void {
     accuracyCircle.setRadius(accuracyM);
   }
 
-  map.panTo(latLng, {
-    animate: true,
-    duration: 0.5
-  });
+  if (isFollowingLocation) {
+    map.panTo(latLng, {
+      animate: true,
+      duration: 0.5
+    });
+  }
 
   lastGpsPoint = currentGpsPoint;
 }
@@ -1116,7 +1150,8 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 
 async function initializeApp(): Promise<void> {
   updateRouteRecordingButtons();
-
+  updateLocateButtonState();
+  
   try {
     await refreshSavedMaps();
     await openRememberedMapIfAvailable();
