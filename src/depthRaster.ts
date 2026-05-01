@@ -111,3 +111,107 @@ export function sampleDepthMeters(
 
   return Math.abs(value);
 }
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const earthRadiusM = 6371000;
+  const toRad = (degrees: number) => (degrees * Math.PI) / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+
+  return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function isNoDataValue(raster: DepthRaster, value: number): boolean {
+  return raster.noData !== null && Math.abs(value - raster.noData) < 0.000001;
+}
+
+export type MaxDepthInRadiusResult = {
+  depthM: number;
+  lat: number;
+  lon: number;
+};
+
+export function maxDepthInRadiusMeters(
+  raster: DepthRaster,
+  centerLat: number,
+  centerLon: number,
+  radiusMeters: number
+): MaxDepthInRadiusResult | null {
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLon =
+    Math.max(1, metersPerDegreeLat * Math.cos((centerLat * Math.PI) / 180));
+
+  const latDelta = radiusMeters / metersPerDegreeLat;
+  const lonDelta = radiusMeters / metersPerDegreeLon;
+
+  const westBound = centerLon - lonDelta;
+  const eastBound = centerLon + lonDelta;
+  const southBound = centerLat - latDelta;
+  const northBound = centerLat + latDelta;
+
+  const xMin = Math.max(
+    0,
+    Math.floor(((westBound - raster.west) / (raster.east - raster.west)) * raster.width)
+  );
+
+  const xMax = Math.min(
+    raster.width - 1,
+    Math.ceil(((eastBound - raster.west) / (raster.east - raster.west)) * raster.width)
+  );
+
+  const yMin = Math.max(
+    0,
+    Math.floor(((raster.north - northBound) / (raster.north - raster.south)) * raster.height)
+  );
+
+  const yMax = Math.min(
+    raster.height - 1,
+    Math.ceil(((raster.north - southBound) / (raster.north - raster.south)) * raster.height)
+  );
+
+  if (xMin > xMax || yMin > yMax) {
+    return null;
+  }
+
+  let best: MaxDepthInRadiusResult | null = null;
+
+  for (let y = yMin; y <= yMax; y++) {
+    for (let x = xMin; x <= xMax; x++) {
+      const lon =
+        raster.west + ((x + 0.5) / raster.width) * (raster.east - raster.west);
+
+      const lat =
+        raster.north - ((y + 0.5) / raster.height) * (raster.north - raster.south);
+
+      if (haversineMeters(centerLat, centerLon, lat, lon) > radiusMeters) {
+        continue;
+      }
+
+      const index = y * raster.width + x;
+      const rawValue = Number(raster.values[index]);
+
+      if (!Number.isFinite(rawValue) || isNoDataValue(raster, rawValue)) {
+        continue;
+      }
+
+      const depth = Math.abs(rawValue);
+
+      if (best === null || depth > best.depthM) {
+        best = {
+          depthM: depth,
+          lat,
+          lon
+        };
+      }
+    }
+  }
+
+  return best;
+}

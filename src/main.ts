@@ -3,7 +3,12 @@ import 'leaflet/dist/leaflet.css';
 import './style.css';
 
 import { readGeoTiffAsImageOverlay } from './geotiffOverlay';
-import { type DepthRaster, readDepthRaster, sampleDepthMeters } from './depthRaster';
+import {
+  maxDepthInRadiusMeters,
+  type DepthRaster,
+  readDepthRaster,
+  sampleDepthMeters
+} from './depthRaster';
 
 import {
   deleteMapPackage,
@@ -29,11 +34,40 @@ type LastGpsPoint = {
 };
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
+  <div id="rangeModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <section class="modal-card">
+      <h2>Range</h2>
+
+      <label class="form-field">
+        <span>Casting range</span>
+        <select id="rangeSelect" class="map-select">
+          <option value="20">20 m</option>
+          <option value="30">30 m</option>
+          <option value="40">40 m</option>
+          <option value="50" selected>50 m</option>
+          <option value="60">60 m</option>
+          <option value="70">70 m</option>
+          <option value="80">80 m</option>
+          <option value="90">90 m</option>
+          <option value="100">100 m</option>
+        </select>
+      </label>
+
+      <div class="modal-actions">
+        <button id="cancelRangeModalButton" class="modal-button muted">Cancel</button>
+        <button id="startRangeButton" class="modal-button primary">Choose point</button>
+      </div>
+    </section>
+  </div>
+
   <main class="app">
     <div id="map"></div>
 
     <button id="menuButton" class="menu-button" aria-label="Open menu" aria-expanded="false">
       ☰
+    </button>
+    <button id="cancelRangeButton" class="cancel-range-button hidden" aria-label="Exit range mode">
+      ×
     </button>
 
     <section id="topPanel" class="top-panel hidden">
@@ -42,6 +76,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <button id="startRouteButton" class="menu-action-button route-start">Start</button>
         <button id="stopRouteButton" class="menu-action-button route-stop hidden">Stop</button>
         <button id="routesButton" class="menu-action-button">Routes</button>
+        <button id="rangeButton" class="menu-action-button">Range</button>
 
         <select id="mapSelect" class="map-select" aria-label="Saved maps">
           <option value="">Loading saved maps...</option>
@@ -159,6 +194,13 @@ const closeRoutesButton = document.querySelector<HTMLButtonElement>('#closeRoute
 
 const recordingBanner = document.querySelector<HTMLElement>('#recordingBanner')!;
 
+const rangeButton = document.querySelector<HTMLButtonElement>('#rangeButton')!;
+const rangeModal = document.querySelector<HTMLElement>('#rangeModal')!;
+const rangeSelect = document.querySelector<HTMLSelectElement>('#rangeSelect')!;
+const startRangeButton = document.querySelector<HTMLButtonElement>('#startRangeButton')!;
+const cancelRangeModalButton = document.querySelector<HTMLButtonElement>('#cancelRangeModalButton')!;
+const cancelRangeButton = document.querySelector<HTMLButtonElement>('#cancelRangeButton')!;
+
 const map = L.map('map', {
   zoomControl: false
 }).setView([45.815, 15.982], 15);
@@ -185,6 +227,14 @@ const gpsPane = map.getPane('gpsPane');
 
 if (gpsPane) {
   gpsPane.style.zIndex = '650';
+}
+
+map.createPane('rangePane');
+
+const rangePane = map.getPane('rangePane');
+
+if (rangePane) {
+  rangePane.style.zIndex = '610';
 }
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -235,6 +285,13 @@ let accuracyCircle: L.Circle | null = null;
 let lastGpsPoint: LastGpsPoint | null = null;
 let latestGpsPoint: LastGpsPoint | null = null;
 let depthRaster: DepthRaster | null = null;
+let isRangeModeActive = false;
+let selectedRangeMeters = 50;
+let rangeDot: L.CircleMarker | null = null;
+let rangeCircle: L.Circle | null = null;
+let rangeLabel: L.Marker | null = null;
+let rangeMaxDepthLine: L.Polyline | null = null;
+let rangeMaxDepthDot: L.CircleMarker | null = null;
 
 function setMenuOpen(isOpen: boolean): void {
   topPanel.classList.toggle('hidden', !isOpen);
@@ -267,6 +324,137 @@ function getRememberedActiveMapId(): string | null {
 
 function clearRememberedActiveMapId(): void {
   localStorage.removeItem(ACTIVE_MAP_ID_STORAGE_KEY);
+}
+
+function setRangeModalOpen(isOpen: boolean): void {
+  rangeModal.classList.toggle('hidden', !isOpen);
+}
+
+function clearRangeOverlay(): void {
+  if (rangeDot) {
+    map.removeLayer(rangeDot);
+    rangeDot = null;
+  }
+
+  if (rangeCircle) {
+    map.removeLayer(rangeCircle);
+    rangeCircle = null;
+  }
+
+  if (rangeLabel) {
+    map.removeLayer(rangeLabel);
+    rangeLabel = null;
+  }
+
+  if (rangeMaxDepthLine) {
+    map.removeLayer(rangeMaxDepthLine);
+    rangeMaxDepthLine = null;
+  }
+
+  if (rangeMaxDepthDot) {
+    map.removeLayer(rangeMaxDepthDot);
+    rangeMaxDepthDot = null;
+  }
+}
+
+function stopRangeMode(): void {
+  isRangeModeActive = false;
+  cancelRangeButton.classList.add('hidden');
+  clearRangeOverlay();
+}
+
+function startRangeMode(rangeMeters: number): void {
+  if (!depthRaster) {
+    statusText.textContent = 'Open a map with depth data before using Range.';
+    return;
+  }
+
+  selectedRangeMeters = rangeMeters;
+  isRangeModeActive = true;
+
+  cancelRangeButton.classList.remove('hidden');
+  clearRangeOverlay();
+
+  statusText.textContent = `Tap map to check max depth within ${rangeMeters} m.`;
+  setMenuOpen(false);
+  setRangeModalOpen(false);
+}
+
+function showRangeAtPoint(lat: number, lng: number): void {
+  if (!depthRaster) {
+    statusText.textContent = 'No depth raster loaded.';
+    return;
+  }
+
+  clearRangeOverlay();
+
+  const maxDepthResult = maxDepthInRadiusMeters(
+    depthRaster,
+    lat,
+    lng,
+    selectedRangeMeters
+  );
+
+  rangeCircle = L.circle([lat, lng], {
+    pane: 'rangePane',
+    radius: selectedRangeMeters,
+    color: '#ef4444',
+    weight: 2,
+    fillColor: '#ef4444',
+    fillOpacity: 0.08
+  }).addTo(map);
+
+  rangeDot = L.circleMarker([lat, lng], {
+    pane: 'rangePane',
+    radius: 7,
+    color: '#ffffff',
+    weight: 2,
+    fillColor: '#ef4444',
+    fillOpacity: 1
+  }).addTo(map);
+
+  if (maxDepthResult !== null) {
+    rangeMaxDepthLine = L.polyline(
+      [
+        [lat, lng],
+        [maxDepthResult.lat, maxDepthResult.lon]
+      ],
+      {
+        pane: 'rangePane',
+        color: '#facc15',
+        weight: 4,
+        opacity: 0.95,
+        dashArray: '8 8'
+      }
+    ).addTo(map);
+
+    rangeMaxDepthDot = L.circleMarker([maxDepthResult.lat, maxDepthResult.lon], {
+      pane: 'rangePane',
+      radius: 6,
+      color: '#000000',
+      weight: 2,
+      fillColor: '#facc15',
+      fillOpacity: 1
+    }).addTo(map);
+  }
+
+  const labelText =
+    maxDepthResult === null
+      ? `No depth data<br>${selectedRangeMeters} m range`
+      : `Max depth ${maxDepthResult.depthM.toFixed(1)} m<br>${selectedRangeMeters} m range`;
+
+  const labelIcon = L.divIcon({
+    className: 'range-depth-label',
+    html: labelText,
+    iconSize: [150, 44],
+    iconAnchor: [75, 54]
+  });
+
+  rangeLabel = L.marker([lat, lng], {
+    pane: 'rangePane',
+    icon: labelIcon,
+    interactive: false
+  }).addTo(map);
 }
 
 async function refreshSavedMaps(preferredSelectedId?: string): Promise<void> {
@@ -455,6 +643,7 @@ async function openStoredMap(mapPackage: StoredMapPackage): Promise<void> {
   }).addTo(map);
 
   clearRouteOverlays();
+  stopRangeMode();
 
   depthRaster = nextDepthRaster;
   activeMapId = mapPackage.id;
@@ -720,6 +909,42 @@ deleteMapButton.addEventListener('click', async () => {
     statusText.textContent =
       error instanceof Error ? error.message : 'Could not delete map.';
   }
+});
+
+rangeButton.addEventListener('click', () => {
+  if (!activeMapId || !depthRaster) {
+    statusText.textContent = 'Open a saved map before using Range.';
+    return;
+  }
+
+  setRangeModalOpen(true);
+});
+
+cancelRangeModalButton.addEventListener('click', () => {
+  setRangeModalOpen(false);
+});
+
+rangeModal.addEventListener('click', (event) => {
+  if (event.target === rangeModal) {
+    setRangeModalOpen(false);
+  }
+});
+
+startRangeButton.addEventListener('click', () => {
+  const rangeMeters = Number(rangeSelect.value);
+  startRangeMode(rangeMeters);
+});
+
+cancelRangeButton.addEventListener('click', () => {
+  stopRangeMode();
+});
+
+map.on('click', (event) => {
+  if (!isRangeModeActive) {
+    return;
+  }
+
+  showRangeAtPoint(event.latlng.lat, event.latlng.lng);
 });
 
 function startGpsAutomatically(): void {
