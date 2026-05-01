@@ -390,7 +390,7 @@ input {
 .locate-button {
   position: absolute;
   right: 10px;
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 82px);
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 100px);
   z-index: 40;
   width: 46px;
   height: 46px;
