@@ -889,8 +889,12 @@ openMapButton.addEventListener('click', async () => {
     setMenuOpen(false);
   } catch (error) {
     console.error(error);
-    statusText.textContent =
+
+    const message =
       error instanceof Error ? error.message : 'Could not open saved map.';
+
+    statusText.textContent = message;
+    window.alert(message);
   }
 });
 
